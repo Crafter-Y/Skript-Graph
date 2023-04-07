@@ -5,13 +5,7 @@ import java.time.LocalTime
 
 plugins {
 	id 'com.github.johnrengelman.shadow' version '8.1.1'
-	id 'com.github.hierynomus.license' version '0.16.1'
-	id 'maven-publish'
 	id 'java'
-}
-
-configurations {
-    testImplementation.extendsFrom testShadow
 }
 
 allprojects {
@@ -36,9 +30,6 @@ dependencies {
 	}
 
 	implementation fileTree(dir: 'lib', include: '*.jar')
-
-	testShadow group: 'junit', name: 'junit', version: '4.13.2'
-	testShadow group: 'org.easymock', name: 'easymock', version: '5.1.0'
 }
 
 task checkAliases {
@@ -51,12 +42,6 @@ task checkAliases {
 	}
 }
 
-task testJar(type: ShadowJar) {
-	dependsOn(compileTestJava, licenseTest)
-	archiveFileName = 'Skript-JUnit.jar'
-	from sourceSets.test.output, sourceSets.main.output, project.configurations.testShadow
-}
-
 task jar(overwrite: true, type: ShadowJar) {
 	dependsOn checkAliases
 	archiveFileName = jarName ? 'Skript.jar' : jarName
@@ -66,12 +51,6 @@ task jar(overwrite: true, type: ShadowJar) {
 task build(overwrite: true, type: ShadowJar) {
 	archiveFileName = jarName ? 'Skript.jar' : jarName
 	from sourceSets.main.output
-}
-
-// Excludes the tests for the build task. Should be using junit, junitJava17, junitJava8, skriptTest, quickTest.
-// We do not want tests to run for building. That's time consuming and annoying. Especially in development.
-test {
-	exclude '**/*'
 }
 
 task sourceJar(type: Jar) {
@@ -114,38 +93,6 @@ processResources {
 	]
 }
 
-publishing {
-	publications {
-		maven(MavenPublication) {
-			groupId 'com.github.SkriptLang'
-			artifactId 'Skript'
-			version project.version
-			artifact sourceJar
-			artifact tasks.jar
-		}
-	}
-
-	repositories {
-		maven {
-			name = 'repo'
-			url = 'https://repo.skriptlang.org/releases'
-			credentials {
-				username = System.getenv('MAVEN_USERNAME')
-				password = System.getenv('MAVEN_PASSWORD')
-			}
-		}
-	}
-}
-
-license {
-	header file('licenseheader.txt')
-	exclude('**/Metrics.java') // Not under GPLv3
-	exclude('**/BurgerHelper.java') // Not exclusively GPLv3
-	exclude('**/*.sk') // Sample scripts and maybe aliases
-	exclude('**/*.lang') // Language files do not have headers (still under GPLv3)
-	exclude('**/*.json') // JSON files do not have headers
-}
-
 javadoc {
 	source = sourceSets.main.allJava
 	classpath = configurations.compileClasspath
@@ -154,80 +101,8 @@ javadoc {
 	options.addStringOption('Xdoclint:none', '-quiet')
 }
 
-// Task to check that test scripts are named correctly
-tasks.register('testNaming') {
-	doLast {
-		// Regression tests
-		for (def file : project.file('src/test/skript/tests/regressions').listFiles()) {
-			def name = file.getName()
-			if (name.toLowerCase(Locale.ENGLISH) != name) {
-				throw new InvalidUserDataException('invalid test name: ' + name)
-			}
-		}
-
-		// Syntax tests
-		for (def dir : project.file('src/test/skript/tests/syntaxes').listFiles()) {
-			for (def file : dir.listFiles()) {
-				def name = file.getName()
-				if (!name.startsWith('.') && !Character.isJavaIdentifierStart(name.codePointAt(0))) {
-					throw new InvalidUserDataException('invalid test name: ' + name)
-				}
-			}
-		}
-	}
-}
-
 enum Modifiers {
 	DEV_MODE, GEN_DOCS, DEBUG, PROFILE, JUNIT
-}
-
-// Create a test task with given name, environments dir/file, dev mode and java version.
-void createTestTask(String name, String desc, String environments, int javaVersion, Modifiers... modifiers) {
-	boolean junit = modifiers.contains(Modifiers.JUNIT)
-	tasks.register(name, JavaExec) {
-		description = desc;
-		dependsOn licenseTest
-		if (junit) {
-			dependsOn testJar
-		} else {
-			dependsOn nightlyRelease, testNaming
-		}
-		javaLauncher = javaToolchains.launcherFor {
-	        languageVersion = JavaLanguageVersion.of(javaVersion)
-	    }
-		if (modifiers.contains(Modifiers.DEV_MODE)) {
-			standardInput = System.in
-		}
-		group = 'execution'
-		classpath = files([
-			'build' + File.separator + 'libs' + File.separator + (junit ? 'Skript-JUnit.jar' : 'Skript-nightly.jar'),
-			project.configurations.runtimeClasspath.find { it.name.startsWith('gson') },
-			sourceSets.main.runtimeClasspath
-		])
-		main = 'ch.njol.skript.test.platform.PlatformMain'
-		args = [
-			'build/test_runners',
-			junit ? 'src/test/skript/tests/junit' : 'src/test/skript/tests',
-			'src/test/resources/runner_data',
-			environments,
-			modifiers.contains(Modifiers.DEV_MODE),
-			modifiers.contains(Modifiers.GEN_DOCS),
-			junit,
-			modifiers.contains(Modifiers.DEBUG),
-			project.findProperty('verbosity') ?: "null"
-		]
-
-		// Do first is used when throwing exceptions.
-		// This way it's not called when defining the task.
-		doFirst {
-			if (!gradle.taskGraph.hasTask(":tasks") && !gradle.startParameter.dryRun && modifiers.contains(Modifiers.PROFILE)) {
-				if (!project.hasProperty('profiler'))
-					throw new MissingPropertyException('Add parameter -Pprofiler=<path to profiler>', 'profiler', String.class)
-	
-				args += '-agentpath:' + project.property('profiler') + '=port=8849,nowait'
-			}
-		}
-	}
 }
 
 def latestEnv = 'java17/paper-1.19.4.json'
@@ -244,29 +119,6 @@ tasks.withType(JavaCompile).configureEach {
 
 compileJava.options.encoding = 'UTF-8'
 compileTestJava.options.encoding = 'UTF-8'
-
-// Register different Skript testing tasks
-String environments = 'src/test/skript/environments/';
-String env = project.property('testEnv') == null ? latestEnv : project.property('testEnv') + '.json'
-int envJava = project.property('testEnvJavaVersion') == null ? latestJava : Integer.parseInt(project.property('testEnvJavaVersion') as String)
-createTestTask('quickTest', 'Runs tests on one environment being the latest supported Java and Minecraft.', environments + latestEnv, latestJava)
-createTestTask('skriptTestJava17', 'Runs tests on all Java 17 environments.', environments + 'java17', latestJava)
-createTestTask('skriptTestJava8', 'Runs tests on all Java 8 environments.', environments + 'java8', oldestJava)
-createTestTask('skriptTestDev', 'Runs testing server and uses \'system.in\' for command input, stop server to finish.', environments + env, envJava, Modifiers.DEV_MODE, Modifiers.DEBUG)
-createTestTask('skriptProfile', 'Starts the testing server with JProfiler support.', environments + latestEnv, latestJava, Modifiers.PROFILE)
-createTestTask('genDocs', 'Generates the Skript documentation website html files.', environments + env, envJava, Modifiers.GEN_DOCS)
-tasks.register('skriptTest') {
-	description = 'Runs tests on all environments.'
-	dependsOn skriptTestJava8, skriptTestJava17
-}
-
-createTestTask('JUnitQuick', 'Runs JUnit tests on one environment being the latest supported Java and Minecraft.', environments + latestEnv, latestJava, Modifiers.JUNIT)
-createTestTask('JUnitJava17', 'Runs JUnit tests on all Java 17 environments.', environments + 'java17', latestJava, Modifiers.JUNIT)
-createTestTask('JUnitJava8', 'Runs JUnit tests on all Java 8 environments.', environments + 'java8', oldestJava, Modifiers.JUNIT)
-tasks.register('JUnit') {
-	description = 'Runs JUnit tests on all environments.'
-	dependsOn JUnitJava8, JUnitJava17
-}
 
 // Build flavor configurations
 task githubResources(type: ProcessResources) {
@@ -359,7 +211,7 @@ task nightlyResources(type: ProcessResources) {
 
 task nightlyRelease(type: ShadowJar) {
 	from sourceSets.main.output
-	dependsOn nightlyResources, licenseMain
+	dependsOn nightlyResources
 	archiveFileName = 'Skript-nightly.jar'
 	manifest {
 		attributes(
