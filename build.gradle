@@ -44,6 +44,10 @@ task checkAliases {
 
 task jar(overwrite: true, type: ShadowJar) {
 	dependsOn checkAliases
+
+    manifest {
+		attributes 'Main-Class': 'de.craftery.skriptgraph.Main'
+    }
 	archiveFileName = jarName ? 'Skript.jar' : jarName
 	from sourceSets.main.output
 }
@@ -62,6 +66,10 @@ tasks.withType(ShadowJar) {
 	configurations = [
 		project.configurations.shadow
 	]
+
+    manifest {
+		attributes 'Main-Class': 'de.craftery.skriptgraph.Main'
+    }
 	dependencies {
 		include(dependency('io.papermc:paperlib'))
 		include(dependency('org.bstats:bstats-bukkit'))
@@ -69,13 +77,6 @@ tasks.withType(ShadowJar) {
 	}
 	relocate 'io.papermc.lib', 'ch.njol.skript.paperlib'
 	relocate 'org.bstats', 'ch.njol.skript.bstats'
-	manifest {
-		attributes(
-			'Name': 'ch/njol/skript',
-			'Automatic-Module-Name': 'ch.njol.skript',
-			'Sealed': 'true'
-		)
-	}
 	from 'skript-aliases', {
 		into 'aliases-english' // Change this if we get aliases in other languages
 	}
@@ -101,10 +102,6 @@ javadoc {
 	options.addStringOption('Xdoclint:none', '-quiet')
 }
 
-enum Modifiers {
-	DEV_MODE, GEN_DOCS, DEBUG, PROFILE, JUNIT
-}
-
 def latestEnv = 'java17/paper-1.19.4.json'
 def latestJava = 17
 def oldestJava = 8
@@ -119,105 +116,3 @@ tasks.withType(JavaCompile).configureEach {
 
 compileJava.options.encoding = 'UTF-8'
 compileTestJava.options.encoding = 'UTF-8'
-
-// Build flavor configurations
-task githubResources(type: ProcessResources) {
-	from 'src/main/resources', {
-		include '**'
-		version = project.property('version')
-		def channel = 'stable'
-		if (version.contains('alpha'))
-			channel = 'alpha'
-		else if (version.contains('beta'))
-			channel = 'beta'
-		filter ReplaceTokens, tokens: [
-			'version'         : version,
-			'today'           : '' + LocalTime.now(),
-			'release-flavor'  : 'skriptlang-github', // SkriptLang build, distributed on Github
-			'release-channel' : channel, // Release channel, see above
-			'release-updater' : 'ch.njol.skript.update.GithubChecker', // Github API client
-			'release-source'  : 'https://api.github.com/repos/SkriptLang/Skript/releases', // Github API URL
-			'release-download': 'null' // Update checker will figure it out
-		]
-	}
-	into 'build/resources/main'
-}
-
-task githubRelease(type: ShadowJar) {
-	from sourceSets.main.output
-	dependsOn githubResources
-	archiveFileName = 'Skript-github.jar'
-	manifest {
-		attributes(
-			'Name': 'ch/njol/skript',
-			'Automatic-Module-Name': 'ch.njol.skript',
-			'Sealed': 'true'
-		)
-	}
-}
-
-task spigotResources(type: ProcessResources) {
-	from 'src/main/resources', {
-		include '**'
-		version = project.property('version')
-		def channel = 'stable'
-		if (version.contains('alpha'))
-			channel = 'alpha'
-		else if (version.contains('beta'))
-			channel = 'beta'
-		filter ReplaceTokens, tokens: [
-			'version'         : version,
-			'today'           : '' + LocalTime.now(),
-			'release-flavor'  : 'skriptlang-spigot', // SkriptLang build, distributed on Spigot resources
-			'release-channel' : channel, // Release channel, see above
-			'release-updater' : 'ch.njol.skript.update.GithubChecker', // Github API client
-			'release-source'  : 'https://api.github.com/repos/SkriptLang/Skript/releases', // Github API URL
-			'release-download': '\'http://example.com\'' // TODO insert Spigot URL
-		]
-	}
-	into 'build/resources/main'
-}
-
-task spigotRelease(type: ShadowJar) {
-	from sourceSets.main.output
-	dependsOn spigotResources
-	archiveFileName = 'Skript-spigot.jar'
-	manifest {
-		attributes(
-			'Name': 'ch/njol/skript',
-			'Automatic-Module-Name': 'ch.njol.skript',
-			'Sealed': 'true'
-		)
-	}
-}
-
-task nightlyResources(type: ProcessResources) {
-	from 'src/main/resources', {
-		include '**'
-		def hash = 'git rev-parse --short HEAD'.execute().text.trim()
-		version = project.property('version') + '-nightly-' + hash
-		filter ReplaceTokens, tokens: [
-			'version'         : version,
-			'today'           : '' + LocalTime.now(),
-			'release-flavor'  : 'skriptlang-nightly', // SkriptLang build, automatically done by CI
-			'release-channel' : 'alpha', // No update checking, but these are VERY unstable
-			'release-updater' : 'ch.njol.skript.update.NoUpdateChecker', // No autoupdates for now
-			'release-source'  : '',
-			'release-download': 'null'
-		]
-	}
-	into 'build/resources/main'
-}
-
-task nightlyRelease(type: ShadowJar) {
-	from sourceSets.main.output
-	dependsOn nightlyResources
-	archiveFileName = 'Skript-nightly.jar'
-	manifest {
-		attributes(
-			'Name': 'ch/njol/skript',
-			'Automatic-Module-Name': 'ch.njol.skript',
-			'Sealed': 'true'
-		)
-	}
-}
